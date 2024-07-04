@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ROUND_COUNT 8
-
+#define BLOCK_LEN 16
 static const uint8_t s_box[256] = {
 //  0     1    2      3     4    5     6     7      8    9     A      B    C     D     E     F
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -41,11 +41,6 @@ static const uint8_t rs_box[256] = {
   0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d, 0x2d, 0xe5, 0x7a, 0x9f, 0x93, 0xc9, 0x9c, 0xef,
   0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
   0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d };
-
-//this func doesnt work for some reason
-void sub_sbox(uint8_t val){
-  val = s_box[val];
-}
 
 void sub_even(uint8_t * data){
   for(int i = 0; i <= 14; i += 2 ){
@@ -144,9 +139,9 @@ void shift_up(char * data){
   data[3] = swap;
 }
 
-void xor_block(uint8_t * state, uint8_t * val){
+void xor_block(uint8_t * dst, uint8_t * src){
   for(int i = 0; i < 16; ++i){
-    state[i] ^= val[i];
+    dst[i] ^= src[i];
   }
 }
 
@@ -159,12 +154,13 @@ void round_key_gen(uint8_t * key, uint8_t round_keys[ROUND_COUNT][16]){
   }
 }
 
-int encrypt_pine(uint8_t * key, uint8_t * plain,uint8_t * cipher){
+//encrypt single block of data
+void encrypt_pine(uint8_t * key, uint8_t * plain,uint8_t * cipher){
   uint8_t round_keys[ROUND_COUNT][16];
-  uint8_t hold[16];
+  uint8_t hold[BLOCK_LEN];
   round_key_gen(key, round_keys);
-  memcpy(hold, plain, 16);
-  for(int i = 0; i < ROUND_COUNT; i++){ 
+  memcpy(hold, plain, BLOCK_LEN);
+  for(uint8_t i = 0; i < ROUND_COUNT; i++){ 
     sweep_left(hold);
     sub_even(hold);
     
@@ -172,20 +168,19 @@ int encrypt_pine(uint8_t * key, uint8_t * plain,uint8_t * cipher){
     
     sweep_right(hold);
     sub_odd(hold);
-
+//add round key
     xor_block(hold, round_keys[i]);
   }
-  memcpy(cipher, hold, 16);
-  return 0;
+  memcpy(cipher, hold, BLOCK_LEN);
 }
-
-int decrypt_pine(uint8_t * key, uint8_t * cipher, uint8_t * plain){
+//decrypt single block of data
+void decrypt_pine(uint8_t * key, uint8_t * cipher, uint8_t * plain){
   uint8_t round_keys[ROUND_COUNT][16];
-  uint8_t hold[16];
+  uint8_t hold[BLOCK_LEN];
   round_key_gen(key, round_keys);
-  memcpy(hold, cipher, 16);
+  memcpy(hold, cipher, BLOCK_LEN);
 
-  for(int i = ROUND_COUNT - 1; i >= 0; --i){
+  for(int8_t i = ROUND_COUNT - 1; i >= 0; --i){
     xor_block(hold, round_keys[i]);
     
     rsub_odd(hold);
@@ -196,91 +191,59 @@ int decrypt_pine(uint8_t * key, uint8_t * cipher, uint8_t * plain){
     rsub_even(hold);
     sweep_rev_left(hold); 
   }
-  memcpy(plain, hold, 16);
-  return 0;
+  memcpy(plain, hold, BLOCK_LEN);
 }
 
 int encrypt_ecb_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len){
-  if(len % 16 != 0){
+  if(len % BLOCK_LEN != 0){
     return 1;
   }
-  unsigned long block_c = len / 16;
-  printf("Block_c: %ld\n", block_c);
+  unsigned long block_c = len / BLOCK_LEN;
   for(unsigned long i = 0; i < block_c; ++i){
-    encrypt_pine(key, &(plain[i * 16]), &(crypt[i * 16]));
+    encrypt_pine(key, &(plain[i * BLOCK_LEN]), &(crypt[i * BLOCK_LEN]));
   }
   return 0;
 }
 
 int decrypt_ecb_pine(uint8_t * key, uint8_t * crypt, uint8_t * plain, unsigned long len){
-  if(len % 16 != 0){
+  if(len % BLOCK_LEN != 0){
     return 1;
   }
-  unsigned long block_c = len / 16;
-  printf("Block_c: %ld\n", block_c);
+  unsigned long block_c = len / BLOCK_LEN;
   for(unsigned long i = 0; i < block_c; ++i){
-    decrypt_pine(key, &(crypt[i * 16]), &(plain[i * 16]));
+    decrypt_pine(key, &(crypt[i * BLOCK_LEN]), &(plain[i * BLOCK_LEN]));
   }
   return 0;
 }
-
-//for now both of these modify the original text
-//this must be changed
 
 
 int encrypt_cbc_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len, char * iv){
-  if(len % 16 != 0){
+  if(len % BLOCK_LEN != 0){
     return 1;
   }
-  uint8_t hold[16];
-  memcpy(hold, plain, 16);
+  uint8_t hold[BLOCK_LEN];
+  memcpy(hold, plain, BLOCK_LEN);
   xor_block(hold, iv);
-  unsigned long block_c = len / 16;
+  unsigned long block_c = len / BLOCK_LEN;
   encrypt_pine(key, hold, crypt);
   for(unsigned long i = 1; i < block_c; ++i){
-    memcpy(hold, &(plain[i * 16]), 16);
-    xor_block( hold, &(crypt[(i - 1) * 16]));
-    encrypt_pine(key, hold, &(crypt[i * 16]));
+    memcpy(hold, &(plain[i * BLOCK_LEN]), BLOCK_LEN);
+    xor_block( hold, &(crypt[(i - 1) * BLOCK_LEN]));
+    encrypt_pine(key, hold, &(crypt[i * BLOCK_LEN]));
   }
   return 0;
 }
 
-
 int decrypt_cbc_pine(uint8_t * key, uint8_t * crypt, uint8_t * plain, unsigned long len, char * iv){
-  if(len % 16 != 0){
+  if(len % BLOCK_LEN != 0){
     return 1;
   }
-  unsigned long block_c = len / 16;
+  unsigned long block_c = len / BLOCK_LEN;
   for(unsigned long i = block_c - 1; i > 0; --i){
-    decrypt_pine(key, &(crypt[i * 16]), &(plain[i * 16]));
-    xor_block(&(plain[i * 16]), &(crypt[(i - 1) * 16]));
+    decrypt_pine(key, &(crypt[i * BLOCK_LEN]), &(plain[i * BLOCK_LEN]));
+    xor_block(&(plain[i * BLOCK_LEN]), &(crypt[(i - 1) * BLOCK_LEN]));
   }
   decrypt_pine(key, crypt, plain);
   xor_block(plain, iv);
   return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
