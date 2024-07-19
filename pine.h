@@ -258,13 +258,13 @@ int decrypt_cbc_pine(uint8_t * key, uint8_t * crypt, uint8_t * plain, unsigned l
   return 0;
 }
 
-int encrypt_ctr_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len, uint8_t * iv, unsigned long start_ct){
+int encrypt_ctr_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len, uint8_t * iv){
   rkey_t keys;
   round_key_gen(key, keys);
   ctr_t counter;
   uint8_t buff[16];
   unsigned long block_c = len / BLOCK_LEN;
-  for(counter.ct = start_ct; counter.ct <= block_c + start_ct; ++counter.ct){
+  for(counter.ct = 0; counter.ct <= block_c; ++counter.ct){
      memcpy(buff, iv, BLOCK_LEN);
      for(uint8_t i = 0; i < 4; ++i){
        buff[i] ^= counter.ctr[i];
