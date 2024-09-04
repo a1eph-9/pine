@@ -259,30 +259,47 @@ int decrypt_cbc_pine(uint8_t * key, uint8_t * crypt, uint8_t * plain, unsigned l
 }
 
 int encrypt_ctr_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len, uint8_t * iv){
+  uint8_t inc;
+  uint8_t ks[16];
+  uint8_t iv_tmp[16];
+  unsigned long i;
   rkey_t keys;
   round_key_gen(key, keys);
-  ctr_t counter;
-  uint8_t buff[16];
-  unsigned long block_c = len / BLOCK_LEN;
-  for(counter.ct = 0; counter.ct <= block_c; ++counter.ct){
-     memcpy(buff, iv, BLOCK_LEN);
-     for(uint8_t i = 0; i < 4; ++i){
-       buff[i] ^= counter.ctr[i];
-     }
-     encrypt_pine(buff, buff, keys);
-     if(counter.ct != block_c){
-     xor_block(buff, &(plain[counter.ct * BLOCK_LEN]));
-     memcpy(&(crypt[counter.ct * BLOCK_LEN]), buff, 16);
-     }
-     else if(counter.ct == block_c && len % BLOCK_LEN != 0){
-       for(uint8_t i = 0; i < len % BLOCK_LEN; ++i){
-         buff[i] ^= plain[(counter.ct * BLOCK_LEN) + i];
-       }
-     memcpy(&(crypt[counter.ct * BLOCK_LEN]), buff, len % BLOCK_LEN);
-     }
+  memcpy(iv_tmp, iv, BLOCK_LEN);
+  for(i = 0, inc = BLOCK_LEN; i < len; ++i, ++inc){
+    if(inc == BLOCK_LEN){
+      memcpy(ks, iv_tmp, BLOCK_LEN);
+      encrypt_pine(ks, ks, keys);
+      for(int j = BLOCK_LEN - 1; j >= 0; --j){
+	if(iv_tmp[j] == 255){
+	  iv_tmp[j] = 0;
+	  continue;
+	}
+	else{
+	  iv_tmp[j] += 1;
+	  break;
+	}
+      }
+      inc = 0;
+    }
+    crypt[i] = (ks[inc] ^ plain[i]);
   }
   return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
