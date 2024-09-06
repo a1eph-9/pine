@@ -5,6 +5,7 @@
 
 #define ROUND_COUNT 8
 #define BLOCK_LEN 16
+
 static const uint8_t s_box[256] = {
 //  0     1    2      3     4    5     6     7      8    9     A      B    C     D     E     F
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -42,12 +43,10 @@ static const uint8_t rs_box[256] = {
   0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
   0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d };
 
-typedef uint8_t rkey_t[ROUND_COUNT][16];
-typedef union { 
-  uint64_t ct;
-  uint8_t ctr[8];
-} ctr_t;
-
+typedef struct{
+  uint8_t rkeys[ROUND_COUNT * BLOCK_LEN];
+  uint8_t iv[16];
+}pine_ctx;
 
 void sub_even(uint8_t * data){
   for(int i = 0; i <= 14; i += 2 ){
@@ -152,17 +151,34 @@ void xor_block(uint8_t * dst, uint8_t * src){
   }
 }
 
-void round_key_gen(uint8_t * key, rkey_t round_keys){
-  memcpy(round_keys[0], key, 16);
+void round_key_gen(uint8_t * key, uint8_t * round_keys){
+  puts("1");//crashes here, probably because of pointer type error thing 
+  memcpy(round_keys, key, 16);
+  puts("2"); 
   for(int i = 1; i < ROUND_COUNT; ++i){
-    memcpy(round_keys[i], round_keys[i - 1], 16);
-    sub_odd(round_keys[i]);
-    sweep_left(round_keys[i]);
+    memcpy(&(round_keys[i * 16]), &(round_keys[(i - 1) * 16]), 16);
+    sub_odd(&(round_keys[i * 16]));
+    sweep_left(&(round_keys[i * 16]));
   }
 }
 
+void pine_ctx_init(pine_ctx * ctx, uint8_t * key){
+  round_key_gen(key, ctx->rkeys);
+}
+
+void pine_ctx_init_iv(pine_ctx * ctx, uint8_t * key, uint8_t * iv){
+  round_key_gen(key, ctx->rkeys);
+  memcpy(ctx->iv, iv, 16);
+
+}
+
+void pine_ctx_set_iv(pine_ctx * ctx, uint8_t * iv){
+  memcpy(ctx->iv, iv, 16);
+}
+
+
 //encrypt single block of data
-void encrypt_pine(uint8_t * plain,uint8_t * cipher, rkey_t keys){
+void encrypt_pine(uint8_t * plain,uint8_t * cipher, uint8_t * keys){
   uint8_t hold[BLOCK_LEN];
   memcpy(hold, plain, BLOCK_LEN);
   for(uint8_t i = 0; i < ROUND_COUNT; i++){ 
@@ -174,16 +190,16 @@ void encrypt_pine(uint8_t * plain,uint8_t * cipher, rkey_t keys){
     sweep_right(hold);
     sub_odd(hold);
 //add round key
-    xor_block(hold, keys[i]);
+    xor_block(hold, &(keys[i * 16]));
   }
   memcpy(cipher, hold, BLOCK_LEN);
 }
 //decrypt single block of data
-void decrypt_pine(uint8_t * cipher, uint8_t * plain, rkey_t keys){
+void decrypt_pine(uint8_t * cipher, uint8_t * plain, uint8_t * keys){
   uint8_t hold[BLOCK_LEN];
   memcpy(hold, cipher, BLOCK_LEN);
   for(int8_t i = ROUND_COUNT - 1; i >= 0; --i){
-    xor_block(hold, keys[i]);
+    xor_block(hold, &(keys[i * 16]));
     
     rsub_odd(hold);
     sweep_rev_right(hold); 
@@ -196,80 +212,70 @@ void decrypt_pine(uint8_t * cipher, uint8_t * plain, rkey_t keys){
   memcpy(plain, hold, BLOCK_LEN);
 }
 
-int encrypt_ecb_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len){
+int encrypt_ecb_pine(pine_ctx * ctx, uint8_t * plain, uint8_t * crypt, unsigned long len){
   if(len % BLOCK_LEN != 0){
     return 1;
   }
-  rkey_t keys;
-  round_key_gen(key, keys);
   unsigned long block_c = len / BLOCK_LEN;
   for(unsigned long i = 0; i < block_c; ++i){
-    encrypt_pine(&(plain[i * BLOCK_LEN]), &(crypt[i * BLOCK_LEN]), keys);
+    encrypt_pine(&(plain[i * BLOCK_LEN]), &(crypt[i * BLOCK_LEN]), ctx->rkeys);
   }
   return 0;
 }
 
-int decrypt_ecb_pine(uint8_t * key, uint8_t * crypt, uint8_t * plain, unsigned long len){
+int decrypt_ecb_pine(pine_ctx * ctx, uint8_t * crypt, uint8_t * plain, unsigned long len){
   if(len % BLOCK_LEN != 0){
     return 1;
   }
-  rkey_t keys;
-  round_key_gen(key, keys);
   unsigned long block_c = len / BLOCK_LEN;
   for(unsigned long i = 0; i < block_c; ++i){
-    decrypt_pine(&(crypt[i * BLOCK_LEN]), &(plain[i * BLOCK_LEN]), keys);
+    decrypt_pine(&(crypt[i * BLOCK_LEN]), &(plain[i * BLOCK_LEN]), ctx->rkeys);
   }
   return 0;
 }
 
 
-int encrypt_cbc_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len, char * iv){
+int encrypt_cbc_pine(pine_ctx * ctx, uint8_t * plain, uint8_t * crypt, unsigned long len){
   if(len % BLOCK_LEN != 0){
     return 1;
   }
-  rkey_t keys;
-  round_key_gen(key, keys);
   uint8_t hold[BLOCK_LEN];
   memcpy(hold, plain, BLOCK_LEN);
-  xor_block(hold, iv);
+  xor_block(hold, ctx->iv);
   unsigned long block_c = len / BLOCK_LEN;
-  encrypt_pine(hold, crypt, keys);
+  encrypt_pine(hold, crypt, ctx->rkeys);
   for(unsigned long i = 1; i < block_c; ++i){
     memcpy(hold, &(plain[i * BLOCK_LEN]), BLOCK_LEN);
     xor_block( hold, &(crypt[(i - 1) * BLOCK_LEN]));
-    encrypt_pine(hold, &(crypt[i * BLOCK_LEN]), keys);
+    encrypt_pine(hold, &(crypt[i * BLOCK_LEN]), ctx->rkeys);
   }
   return 0;
 }
 
-int decrypt_cbc_pine(uint8_t * key, uint8_t * crypt, uint8_t * plain, unsigned long len, char * iv){
+int decrypt_cbc_pine(pine_ctx * ctx, uint8_t * crypt, uint8_t * plain, unsigned long len){
   if(len % BLOCK_LEN != 0){
     return 1;
   }
-  rkey_t keys;
-  round_key_gen(key, keys);
   unsigned long block_c = len / BLOCK_LEN;
   for(unsigned long i = block_c - 1; i > 0; --i){
-    decrypt_pine(&(crypt[i * BLOCK_LEN]), &(plain[i * BLOCK_LEN]), keys);
+    decrypt_pine(&(crypt[i * BLOCK_LEN]), &(plain[i * BLOCK_LEN]), ctx->rkeys);
     xor_block(&(plain[i * BLOCK_LEN]), &(crypt[(i - 1) * BLOCK_LEN]));
   }
-  decrypt_pine(crypt, plain, keys);
-  xor_block(plain, iv);
+  decrypt_pine(crypt, plain, ctx->rkeys);
+  xor_block(plain, ctx->iv);
   return 0;
 }
 
-int encrypt_ctr_pine(uint8_t * key, uint8_t * plain, uint8_t * crypt, unsigned long len, uint8_t * iv){
+int encrypt_ctr_pine(pine_ctx * ctx, uint8_t * plain, uint8_t * crypt, unsigned long len){
   uint8_t inc;
   uint8_t ks[16];
   uint8_t iv_tmp[16];
   unsigned long i;
-  rkey_t keys;
-  round_key_gen(key, keys);
-  memcpy(iv_tmp, iv, BLOCK_LEN);
+  memcpy(iv_tmp, ctx->iv, BLOCK_LEN);
   for(i = 0, inc = BLOCK_LEN; i < len; ++i, ++inc){
     if(inc == BLOCK_LEN){
       memcpy(ks, iv_tmp, BLOCK_LEN);
-      encrypt_pine(ks, ks, keys);
+      encrypt_pine(ks, ks, ctx->rkeys);
       for(int j = BLOCK_LEN - 1; j >= 0; --j){
 	if(iv_tmp[j] == 255){
 	  iv_tmp[j] = 0;

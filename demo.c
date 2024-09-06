@@ -11,6 +11,7 @@ int main(int argc, char ** argv){
   unsigned char output[16] = {0};
   unsigned char output_dec[16] = {0};
   int len = 16;
+  pine_ctx ctx;
   memset(data, '\0', len);
   memset(key, '\0', 16);
   if(argc != 2 && argc != 3){
@@ -18,16 +19,17 @@ int main(int argc, char ** argv){
   }
   if(argc == 3){strncpy(key, argv[2], len);}
   strncpy(data, argv[1], len);
+  pine_ctx_init_iv(&ctx, key, iv);
   for(int i = 0; i < len; ++i){
     printf("%c ", data[i]);
   }
   puts("");
-  encrypt_ctr_pine(key, data, output, len, iv);
+  encrypt_ctr_pine(&ctx, data, output, len);
   for(int i = 0; i < len; ++i){
     printf("0x%hhx ", output[i]);
   }
   puts("");
-  encrypt_ctr_pine(key, output, output_dec, len, iv);
+  encrypt_ctr_pine(&ctx, output, output_dec, len);
   for(int i = 0; i < len; ++i){
     printf("%c ", output_dec[i]);
   }
